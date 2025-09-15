@@ -1,4 +1,4 @@
-import {Platform, Vibration} from 'react-native';
+import { Platform, Vibration } from 'react-native';
 
 /**
  * Lightweight haptic feedback without extra native deps.
@@ -6,9 +6,13 @@ import {Platform, Vibration} from 'react-native';
  * For richer patterns, consider a dedicated lib later.
  */
 export function impactLight() {
-  if (Platform.OS === 'ios') {
-    Vibration.vibrate(50); // iOS supports a single fixed vibration
-  } else {
-    Vibration.vibrate(10); // short tick on Android
-  }
+    try {
+        if (Platform.OS === 'ios') {
+            Vibration.vibrate(50); // iOS supports a single fixed vibration
+        } else {
+            Vibration.vibrate(10); // short tick on Android
+        }
+    } catch {
+        // Silently ignore if not allowed / not available
+    }
 }

@@ -10,12 +10,7 @@ import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { addFile, removeFile, updateFile } from '@/src/store/filesReducer';
 import type { RootStackParamList } from '@/src/navigation/types';
 import type { FileItem } from '@/src/types/file';
-import {
-    pick,
-    isErrorWithCode,
-    errorCodes,
-    type DocumentPickerResponse,
-} from '@react-native-documents/picker';
+import { pick,isErrorWithCode, errorCodes, type DocumentPickerResponse } from '@react-native-documents/picker';
 import FileListItem from '@/src/components/FileListItem';
 import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight } from '@/src/utils/haptics';
@@ -31,7 +26,7 @@ export default function HomeScreen(): React.JSX.Element {
 
     const [snackVisible, setSnackVisible] = useState(false);
     const [snackMsg, setSnackMsg] = useState('');
-    const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastDeletedRef = useRef<FileItem | null>(null);
 
     useLayoutEffect(() => {
