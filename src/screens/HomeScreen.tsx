@@ -1,12 +1,13 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { View, StyleSheet, FlatList, Text, TouchableOpacity, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Snackbar from '@/src/components/Snackbar';
 import FAB from '@/src/components/FAB';
 import EmptyState from '@/src/components/EmptyState';
 import UploadProgressModal from '@/src/components/UploadProgressModal';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
-import { addFile, updateFile } from '@/src/store/filesReducer';
+import { addFile, removeFile, updateFile } from '@/src/store/filesReducer';
 import type { RootStackParamList } from '@/src/navigation/types';
 import type { FileItem } from '@/src/types/file';
 import {
@@ -16,8 +17,8 @@ import {
     type DocumentPickerResponse,
 } from '@react-native-documents/picker';
 import FileListItem from '@/src/components/FileListItem';
-import { removeFile } from '@/src/store/filesReducer';
 import { startMockUpload } from '@/src/utils/uploadMock';
+import { impactLight } from '@/src/utils/haptics';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -27,6 +28,11 @@ export default function HomeScreen(): React.JSX.Element {
     const [isUploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
+
+    const [snackVisible, setSnackVisible] = useState(false);
+    const [snackMsg, setSnackMsg] = useState('');
+    const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const lastDeletedRef = useRef<FileItem | null>(null);
 
     useLayoutEffect(() => {
         navigation.setOptions({
@@ -99,24 +105,63 @@ export default function HomeScreen(): React.JSX.Element {
         }
     };
 
-    const confirmDelete = (id: string, name: string) => {
-        Alert.alert('Delete file', `Delete “${name}”?`, [
+    const confirmDelete = (item: FileItem) => {
+        impactLight(); // haptic immediato al long-press
+        Alert.alert('Delete file', `Delete “${item.name}”?`, [
             { text: 'Cancel', style: 'cancel' },
             {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: () => dispatch(removeFile(id)),
+                onPress: () => {
+                    // salva l'oggetto completo per ripristino
+                    lastDeletedRef.current = item;
+                    // rimuovi dallo store
+                    dispatch(removeFile(item.id));
+                    // mostra snackbar con undo; se scade, svuota il ref
+                    showUndoSnack('File deleted', () => {
+                        lastDeletedRef.current = null;
+                    });
+                },
             },
         ]);
     };
+
+    const showUndoSnack = (message: string, onTimeout: () => void) => {
+        // cancella eventuale timer precedente
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        setSnackMsg(message);
+        setSnackVisible(true);
+        // 4s di tempo per l'undo
+        undoTimerRef.current = setTimeout(() => {
+            setSnackVisible(false);
+            undoTimerRef.current = null;
+            onTimeout();
+        }, 4000);
+    };
+
+    const handleUndo = () => {
+        if (undoTimerRef.current) {
+            clearTimeout(undoTimerRef.current);
+            undoTimerRef.current = null;
+        }
+        setSnackVisible(false);
+
+        const deleted = lastDeletedRef.current;
+        if (deleted) {
+            // re-add in cima
+            dispatch(addFile(deleted));
+            lastDeletedRef.current = null;
+        }
+    };
+
 
     const renderItem = ({ item }: { item: FileItem }) => (
         <FileListItem
             item={item}
             disabled={isUploading}
             onPress={() => navigation.navigate('Details', { id: item.id })}
-            onDelete={() => confirmDelete(item.id, item.name)}
-            onLongPress={() => confirmDelete(item.id, item.name)}
+            onDelete={() => confirmDelete(item)}
+            onLongPress={() => confirmDelete(item)}
         />
     );
     const keyExtractor = (item: FileItem) => item.id;
@@ -137,6 +182,13 @@ export default function HomeScreen(): React.JSX.Element {
             <FAB onPress={handleAddPress} />
 
             <UploadProgressModal visible={isUploading} progress={progress} filename={currentName} />
+            <Snackbar
+                visible={snackVisible}
+                message={snackMsg}
+                actionLabel="UNDO"
+                onAction={handleUndo}
+                onDismiss={() => setSnackVisible(false)}
+            />
         </View>
     );
 }
