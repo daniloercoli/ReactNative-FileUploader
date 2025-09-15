@@ -15,7 +15,8 @@ import {
     errorCodes,
     type DocumentPickerResponse,
 } from '@react-native-documents/picker';
-
+import FileListItem from '@/src/components/FileListItem';
+import { removeFile } from '@/src/store/filesReducer';
 import { startMockUpload } from '@/src/utils/uploadMock';
 
 export default function HomeScreen(): React.JSX.Element {
@@ -98,20 +99,26 @@ export default function HomeScreen(): React.JSX.Element {
         }
     };
 
-    const renderItem = ({ item }: { item: FileItem }) => (
-        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('Details', { id: item.id })} disabled={isUploading}>
-            <Text style={styles.itemName}>{item.name}</Text>
-            <Text style={styles.itemMeta}>
-                {item.type || 'unknown'} · {item.size ? `${item.size} bytes` : 'size N/A'}
-            </Text>
-            {item.status && (
-                <Text style={styles.badge}>
-                    {item.status}{item.status === 'uploading' ? ` ${Math.round(item.progress ?? 0)}%` : ''}
-                </Text>
-            )}
-        </TouchableOpacity>
-    );
+    const confirmDelete = (id: string, name: string) => {
+        Alert.alert('Delete file', `Delete “${name}”?`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: () => dispatch(removeFile(id)),
+            },
+        ]);
+    };
 
+    const renderItem = ({ item }: { item: FileItem }) => (
+        <FileListItem
+            item={item}
+            disabled={isUploading}
+            onPress={() => navigation.navigate('Details', { id: item.id })}
+            onDelete={() => confirmDelete(item.id, item.name)}
+            onLongPress={() => confirmDelete(item.id, item.name)}
+        />
+    );
     const keyExtractor = (item: FileItem) => item.id;
 
     return (
