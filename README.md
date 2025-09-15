@@ -1,97 +1,47 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Private File Uploader (React Native + WordPress)
 
-# Getting Started
+A privacy-first mobile client for uploading **any file type** directly to **your own server**.  
+The app pairs with a **WordPress plugin** that exposes secure REST endpoints and leverages native WordPress user management and **Application Passwords** for authentication. No external cloud services are involved.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## What it does
+- **Local-first mobile client (React Native)**
+  - Home screen with a **file list**, empty state, and a floating **“+”** action button.
+  - **Tap** an item → detail screen with metadata and **image preview** (if applicable).
+  - **Long press** → context menu (Delete).
+  - **Swipe actions** on list items (Delete).
+  - **Single-file picker** with a **blocking, inline progress** indicator during upload.
+  - **Settings screen** to store an **Application Password** used for authenticated uploads.
+  - **Info screen** for app details and help.
+- **Server component (WordPress plugin)**
+  - Uses **WordPress users/roles** and **Application Passwords** for per-user access.
+  - Provides a secure **REST endpoint** for file uploads (HTTPS required).
+  - Handles MIME checks, size limits, and returns normalized metadata (id, name, size, mime, URL).
+  - Designed for private/self-hosted deployments; files stay on **your infrastructure**.
 
-## Step 1: Start Metro
+## Security model
+- The client authenticates using a **WordPress Application Password** over **HTTPS**.
+- By default, the app stores the credential locally (configurable).  
+  For production deployments, we recommend integrating platform secure storage (Keychain/Keystore).
+- The server plugin validates credentials on each request and enforces server-side rules (size, MIME, user quotas).
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Tech stack (client)
+- React Native, React Navigation (native stack)
+- Vanilla Redux + react-redux (stores the “Application Password” and basic UI state)
+- Gesture handling for swipe/long-press
+- Document picker for file selection
+- Upload progress with a blocking modal
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Server (WordPress plugin)
+- WordPress ≥ 6.x, PHP ≥ 8.x
+- Exposes REST endpoints under `/wp-json/fileuploader/v1/...`
+- Auth via WordPress **Application Passwords** (per user)
+- Stores uploads in the WordPress filesystem/media library (or a dedicated directory), returning file metadata
 
-```sh
-# Using npm
-npm start
+## Roadmap
+- Multi-file and folder selection
+- Background/resumable uploads
+- Per-user quotas and granular role policies
+- Optional client-side encryption (end-to-end) before upload
+- Secure storage integration (Keychain/Keystore)
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+> This repository contains the **mobile client**. The WordPress plugin (server component) is provided separately.
