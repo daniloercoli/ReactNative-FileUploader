@@ -4,7 +4,13 @@
     "strict": true,
     "noImplicitAny": true,
     "noUncheckedIndexedAccess": true,
+    "jsx": "react-jsx",
     "baseUrl": ".",
+    "types": [
+      "react",
+      "react-native",
+      "jest"
+    ],
     "paths": {
       "@/src/*": [
         "src/*"

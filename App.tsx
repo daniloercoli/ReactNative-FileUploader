@@ -1,5 +1,4 @@
 // Root component: wraps the app with Redux Provider, GestureHandlerRootView, and NavigationContainer
-import React from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { Provider } from 'react-redux';

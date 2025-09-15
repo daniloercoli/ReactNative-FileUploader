@@ -1,54 +1,118 @@
-// Home screen: header with Info/Settings buttons, empty state list, and a floating "+" button.
-import React, { useLayoutEffect } from 'react';
-import { View, StyleSheet, FlatList, Text, TouchableOpacity } from 'react-native';
+import React, { useLayoutEffect, useState } from 'react';
+import { View, StyleSheet, FlatList, Text, TouchableOpacity, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import FAB from '@/src/components/FAB';
 import EmptyState from '@/src/components/EmptyState';
-import { useAppSelector } from '@/src/store/hooks';
+import UploadProgressModal from '@/src/components/UploadProgressModal';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
+import { addFile, updateFile } from '@/src/store/filesReducer';
 import type { RootStackParamList } from '@/src/navigation/types';
 import type { FileItem } from '@/src/types/file';
+import {
+    pick,
+    isErrorWithCode,
+    errorCodes,
+    type DocumentPickerResponse,
+} from '@react-native-documents/picker';
 
+import { startMockUpload } from '@/src/utils/uploadMock';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    const dispatch = useAppDispatch();
     const files = useAppSelector(state => state.files.items);
 
+    const [isUploading, setUploading] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [currentName, setCurrentName] = useState<string | undefined>(undefined);
 
-    // Configure header buttons (Info + Settings) when the screen is mounted
     useLayoutEffect(() => {
         navigation.setOptions({
             headerRight: () => (
                 <View style={styles.headerRightRow}>
-                    <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('Info')}>
-                        <Text style={styles.headerBtnText}>Info</Text>
+                    <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('Info')} disabled={isUploading}>
+                        <Text style={[styles.headerBtnText, isUploading && styles.disabled]}>Info</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('Settings')}>
-                        <Text style={styles.headerBtnText}>Settings</Text>
+                    <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('Settings')} disabled={isUploading}>
+                        <Text style={[styles.headerBtnText, isUploading && styles.disabled]}>Settings</Text>
                     </TouchableOpacity>
                 </View>
             ),
         });
-    }, [navigation]);
+    }, [navigation, isUploading]);
 
+    const mapPickerToFileItem = (pf: DocumentPickerResponse): FileItem => ({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: pf.name ?? 'Unnamed',
+        uri: pf.uri,
+        type: pf.type ?? 'application/octet-stream',
+        size: pf.size ?? 0,
+        status: 'uploading',
+        progress: 0,
+    });
 
-    // Placeholder press handler for the FAB; will open the picker in the next iteration
-    const handleAddPress = () => {
-        // Next iteration: open file picker modal and start mocked upload
-        console.log('FAB pressed: will open picker in next iteration');
+    const handleAddPress = async () => {
+        try {
+            const [pf] = await pick(); // opzionale: { allowMultiSelection: false }
+            if (!pf) return;
+
+            const fileItem = mapPickerToFileItem(pf);
+            setCurrentName(fileItem.name);
+            setProgress(0);
+            setUploading(true);
+
+            // optimistic add
+            dispatch(addFile(fileItem));
+
+            // mock upload
+            const cancel = startMockUpload(
+                fileItem,
+                (pct) => {
+                    setProgress(pct);
+                    dispatch(updateFile(fileItem.id, { progress: pct }));
+                },
+                () => {
+                    dispatch(updateFile(fileItem.id, { status: 'uploaded', progress: 100 }));
+                    setUploading(false);
+                    setCurrentName(undefined);
+                },
+                (err) => {
+                    console.error('Mock upload error', err);
+                    dispatch(updateFile(fileItem.id, { status: 'failed' }));
+                    setUploading(false);
+                    setCurrentName(undefined);
+                    Alert.alert('Upload failed', 'Something went wrong while uploading your file.');
+                }
+            );
+
+            // In futuro potremmo esporre la cancel UI
+            void cancel;
+        } catch (e: any) {
+            if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+                // utente ha annullato: esci silenziosamente
+                return;
+            }
+            console.error(e);
+            Alert.alert('Picker error', String((e as any)?.message ?? e));
+        }
     };
 
-
     const renderItem = ({ item }: { item: FileItem }) => (
-        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('Details', { id: item.id })}>
+        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('Details', { id: item.id })} disabled={isUploading}>
             <Text style={styles.itemName}>{item.name}</Text>
-            <Text style={styles.itemMeta}>{item.type || 'unknown'} · {item.size ? `${item.size} bytes` : 'size N/A'}</Text>
+            <Text style={styles.itemMeta}>
+                {item.type || 'unknown'} · {item.size ? `${item.size} bytes` : 'size N/A'}
+            </Text>
+            {item.status && (
+                <Text style={styles.badge}>
+                    {item.status}{item.status === 'uploading' ? ` ${Math.round(item.progress ?? 0)}%` : ''}
+                </Text>
+            )}
         </TouchableOpacity>
     );
 
-
     const keyExtractor = (item: FileItem) => item.id;
-
 
     return (
         <View style={styles.container}>
@@ -63,13 +127,12 @@ export default function HomeScreen(): React.JSX.Element {
                 />
             )}
 
-
-            {/* Floating Action Button to add a file */}
             <FAB onPress={handleAddPress} />
+
+            <UploadProgressModal visible={isUploading} progress={progress} filename={currentName} />
         </View>
     );
 }
-
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
@@ -84,7 +147,9 @@ const styles = StyleSheet.create({
     },
     itemName: { fontSize: 16, fontWeight: '600', color: '#111' },
     itemMeta: { marginTop: 4, fontSize: 12, color: '#666' },
+    badge: { marginTop: 6, fontSize: 12, color: '#007aff', fontWeight: '600' },
     headerRightRow: { flexDirection: 'row' },
     headerBtn: { marginLeft: 12, paddingVertical: 6, paddingHorizontal: 8 },
     headerBtnText: { color: '#007aff', fontSize: 15, fontWeight: '500' },
+    disabled: { opacity: 0.4 },
 });

@@ -7,9 +7,7 @@ import SettingsScreen from '@/src/screens/SettingsScreen';
 import InfoScreen from '@/src/screens/InfoScreen';
 import { RootStackParamList } from './types';
 
-
 const Stack = createNativeStackNavigator<RootStackParamList>();
-
 
 export default function AppNavigator(): React.JSX.Element {
     return (
