@@ -40,6 +40,9 @@ export default function HomeScreen(): React.JSX.Element {
     const cancelUploadRef = useRef<(() => void) | null>(null);
     const currentUploadingIdRef = useRef<string | null>(null);
 
+    // Single source of truth for concurrency
+    const hasActiveUpload = () => currentUploadingIdRef.current !== null;
+
     // THROTTLE refs (single upload only)
     const lastDispatchTsRef = useRef(0);
     const lastPctRef = useRef(0);
@@ -84,7 +87,7 @@ export default function HomeScreen(): React.JSX.Element {
         const fn = snackActionRef.current;
         snackActionRef.current = undefined;
         setSnackActionLabel(undefined);
-        if (fn) fn();
+        if (fn) setTimeout(fn, 0); // lascia completare gli state update prima di eseguire l'azione
     };
 
     const mapPickerToFileItem = (pf: DocumentPickerResponse): FileItem => ({
@@ -149,7 +152,7 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const retryUpload = (id: string) => {
-        if (isUploading) {
+        if (hasActiveUpload()) {
             Alert.alert('Upload in progress', 'Please wait until the current upload finishes.');
             return;
         }
@@ -162,6 +165,10 @@ export default function HomeScreen(): React.JSX.Element {
     // --- Handlers --------------------------------------------------------------
 
     const handleAddPress = async () => {
+        if (hasActiveUpload()) {
+            Alert.alert('Upload in progress', 'Please wait until the current upload finishes.');
+            return;
+        }
         try {
             const [pf] = await pick(); // single selection
             if (!pf) return;
