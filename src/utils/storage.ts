@@ -1,10 +1,12 @@
+// src/utils/storage.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { FileItem } from '@/src/types/file';
 
 export type Settings = {
     siteUrl: string | null;
     username: string | null;
-    password: string | null;
+    // password: NON più salvata in AsyncStorage
+    password: string | null; // legacy (letto per migrazione), ma non più scritto
 };
 
 const SETTINGS_KEY = 'app.settings.v1';
@@ -15,6 +17,7 @@ export async function loadSettings(): Promise<Settings> {
         const raw = await AsyncStorage.getItem(SETTINGS_KEY);
         if (!raw) return { siteUrl: null, username: null, password: null };
         const parsed = JSON.parse(raw);
+        // password letta SOLO per migrazione → potrà essere null se già rimossa
         return {
             siteUrl: parsed.siteUrl ?? null,
             username: parsed.username ?? null,
@@ -26,14 +29,15 @@ export async function loadSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(s: Settings): Promise<void> {
-    const safe: Settings = {
+    const safe = {
         siteUrl: s.siteUrl ?? null,
         username: s.username ?? null,
-        password: s.password ?? null,
+        // password: NON scriviamo più la password in chiaro
     };
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(safe));
 }
 
+// resto invariato
 export async function loadFiles(): Promise<FileItem[]> {
     try {
         const raw = await AsyncStorage.getItem(FILES_KEY);
@@ -45,11 +49,9 @@ export async function loadFiles(): Promise<FileItem[]> {
         return [];
     }
 }
-
 export async function saveFiles(items: FileItem[]): Promise<void> {
     await AsyncStorage.setItem(FILES_KEY, JSON.stringify(items));
 }
-
 export async function clearAll(): Promise<void> {
     await AsyncStorage.multiRemove([SETTINGS_KEY, FILES_KEY]);
 }

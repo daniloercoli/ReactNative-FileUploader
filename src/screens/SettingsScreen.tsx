@@ -4,6 +4,8 @@ import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { setPassword, setUsername, setSiteUrl } from '@/src/store/authReducer';
 import { resetApp } from '@/src/store';
 import { clearAll } from '@/src/utils/storage';
+import { normalizeUrl } from '@/src/utils/validation';
+import { saveSecurePassword } from '@/src/utils/secure';
 
 export default function SettingsScreen(): React.JSX.Element {
     const dispatch = useAppDispatch();
@@ -13,13 +15,24 @@ export default function SettingsScreen(): React.JSX.Element {
     const [username, setUsernameLocal] = useState(curUser ?? '');
     const [password, setPasswordLocal] = useState(curPass ?? '');
 
-    const onSave = () => {
-        const url = siteUrl.trim() || null;
+    const onSave = async () => {
+        // 1) normalizza e valida URL (auto-prepend https:// se manca)
+        const normalized = normalizeUrl(siteUrl);
+        if (!normalized) {
+            Alert.alert('Invalid URL', 'Please enter a valid http(s) URL (e.g., https://example.com).');
+            return;
+        }
+
+        // 2) dispatch su Redux
         const user = username.trim() || null;
         const pass = password.trim() || null;
-        dispatch(setSiteUrl(url));
+        dispatch(setSiteUrl(normalized));
         dispatch(setUsername(user));
         dispatch(setPassword(pass));
+
+        // 3) salva password in Keychain/Keystore (sicuro)
+        await saveSecurePassword(normalized, user, pass);
+
         Alert.alert('Saved', 'Settings updated.');
     };
 
@@ -33,10 +46,11 @@ export default function SettingsScreen(): React.JSX.Element {
                     text: 'Reset',
                     style: 'destructive',
                     onPress: async () => {
-                        // clear storage + redux
-                        await clearAll();
+                        await clearAll();  // svuota storage non sicuro
+                        // opzionale: svuota keychain (siteUrl noto? usiamo normalizeUrl per chiudere il cerchio)
+                        const normalized = normalizeUrl(siteUrl) ?? null;
+                        await saveSecurePassword(normalized, null, null); // rimuove da Keychain
                         dispatch(resetApp());
-                        // reset local inputs
                         setSiteUrlLocal('');
                         setUsernameLocal('');
                         setPasswordLocal('');
@@ -90,7 +104,7 @@ export default function SettingsScreen(): React.JSX.Element {
             </TouchableOpacity>
 
             <Text style={styles.note}>
-                These credentials will be used to authenticate upload requests to your server.
+                Site URL and username are stored on-device; the password is stored securely in the OS keychain.
             </Text>
         </View>
     );
@@ -99,16 +113,10 @@ export default function SettingsScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff', padding: 16 },
     label: { fontSize: 14, color: '#444', marginTop: 12, marginBottom: 6 },
-    input: {
-        borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16,
-    },
-    btnPrimary: {
-        marginTop: 16, backgroundColor: '#007aff', borderRadius: 10, paddingVertical: 12, alignItems: 'center',
-    },
+    input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16 },
+    btnPrimary: { marginTop: 16, backgroundColor: '#007aff', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
     btnPrimaryText: { color: '#fff', fontWeight: '600' },
-    btnDanger: {
-        marginTop: 12, backgroundColor: '#ffecec', borderRadius: 10, paddingVertical: 12, alignItems: 'center',
-    },
+    btnDanger: { marginTop: 12, backgroundColor: '#ffecec', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
     btnDangerText: { color: '#ff3b30', fontWeight: '700' },
     note: { marginTop: 12, color: '#666', fontSize: 12 },
 });
