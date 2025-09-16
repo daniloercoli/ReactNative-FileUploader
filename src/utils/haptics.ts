@@ -16,3 +16,16 @@ export function impactLight() {
         // Silently ignore if not allowed / not available
     }
 }
+
+export function success() {
+    try {
+        // Short celebratory pattern on Android; iOS will collapse to a single vibration.
+        if (Platform.OS === 'android') {
+            Vibration.vibrate([0, 20, 40, 20]);
+        } else {
+            Vibration.vibrate(60);
+        }
+    } catch {
+        // Silently ignore if not allowed / not available
+    }
+}

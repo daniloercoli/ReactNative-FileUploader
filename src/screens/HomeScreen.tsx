@@ -10,10 +10,10 @@ import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { addFile, removeFile, updateFile } from '@/src/store/filesReducer';
 import type { RootStackParamList } from '@/src/navigation/types';
 import type { FileItem } from '@/src/types/file';
-import { pick,isErrorWithCode, errorCodes, type DocumentPickerResponse } from '@react-native-documents/picker';
+import { pick, isErrorWithCode, errorCodes, type DocumentPickerResponse } from '@react-native-documents/picker';
 import FileListItem from '@/src/components/FileListItem';
 import { startMockUpload } from '@/src/utils/uploadMock';
-import { impactLight } from '@/src/utils/haptics';
+import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -23,6 +23,9 @@ export default function HomeScreen(): React.JSX.Element {
     const [isUploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
+
+    const cancelUploadRef = useRef<(() => void) | null>(null);
+    const currentUploadingIdRef = useRef<string | null>(null);
 
     const [snackVisible, setSnackVisible] = useState(false);
     const [snackMsg, setSnackMsg] = useState('');
@@ -78,15 +81,23 @@ export default function HomeScreen(): React.JSX.Element {
                     dispatch(updateFile(fileItem.id, { status: 'uploaded', progress: 100 }));
                     setUploading(false);
                     setCurrentName(undefined);
+                    cancelUploadRef.current = null;
+                    currentUploadingIdRef.current = null;
+                    hapticSuccess();
                 },
                 (err) => {
                     console.error('Mock upload error', err);
                     dispatch(updateFile(fileItem.id, { status: 'failed' }));
                     setUploading(false);
                     setCurrentName(undefined);
+                    cancelUploadRef.current = null;
+                    currentUploadingIdRef.current = null;
                     Alert.alert('Upload failed', 'Something went wrong while uploading your file.');
                 }
             );
+
+            cancelUploadRef.current = cancel;            // <-- store cancel
+            currentUploadingIdRef.current = fileItem.id; // <-- store id
 
             // In futuro potremmo esporre la cancel UI
             void cancel;
@@ -98,6 +109,24 @@ export default function HomeScreen(): React.JSX.Element {
             console.error(e);
             Alert.alert('Picker error', String((e as any)?.message ?? e));
         }
+    };
+
+    const handleCancelUpload = () => {
+        // chiude il mock
+        cancelUploadRef.current?.();
+        cancelUploadRef.current = null;
+
+        // marca l'item come canceled
+        const id = currentUploadingIdRef.current;
+        if (id) {
+            dispatch(updateFile(id, { status: 'canceled' }));
+        }
+        currentUploadingIdRef.current = null;
+
+        // sblocca UI
+        setUploading(false);
+        setCurrentName(undefined);
+        setProgress(0);
     };
 
     const confirmDelete = (item: FileItem) => {
@@ -149,7 +178,6 @@ export default function HomeScreen(): React.JSX.Element {
         }
     };
 
-
     const renderItem = ({ item }: { item: FileItem }) => (
         <FileListItem
             item={item}
@@ -176,7 +204,7 @@ export default function HomeScreen(): React.JSX.Element {
 
             <FAB onPress={handleAddPress} />
 
-            <UploadProgressModal visible={isUploading} progress={progress} filename={currentName} />
+            <UploadProgressModal visible={isUploading} progress={progress} filename={currentName} onCancel={handleCancelUpload} />
             <Snackbar
                 visible={snackVisible}
                 message={snackMsg}
