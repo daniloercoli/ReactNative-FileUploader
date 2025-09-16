@@ -19,6 +19,9 @@ import {
 } from '@react-native-documents/picker';
 import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
+import { fetchFilesMock } from '@/src/utils/serverMock';
+import { setFiles } from '@/src/store/filesReducer';
+
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -47,6 +50,8 @@ export default function HomeScreen(): React.JSX.Element {
     const lastDispatchTsRef = useRef(0);
     const lastPctRef = useRef(0);
 
+    const [refreshing, setRefreshing] = useState(false);
+
     useLayoutEffect(() => {
         navigation.setOptions({
             headerRight: () => (
@@ -63,6 +68,14 @@ export default function HomeScreen(): React.JSX.Element {
     }, [navigation, isUploading]);
 
     // --- Helpers ---------------------------------------------------------------
+
+    // Merge helper: keep unique by id, newest first
+    const mergeByIdSorted = (a: FileItem[], b: FileItem[]) => {
+        const map = new Map<string, FileItem>();
+        // Order matters: later set() wins. We want to prefer local state for the same id (if any).
+        [...a, ...b].forEach(f => map.set(f.id, f));
+        return Array.from(map.values()).sort((x, y) => (y.createdAt ?? 0) - (x.createdAt ?? 0));
+    };
 
     const showSnack = (message: string, actionLabel?: string, onAction?: () => void, timeoutMs = 4000) => {
         if (snackTimerRef.current) clearTimeout(snackTimerRef.current);
@@ -219,6 +232,30 @@ export default function HomeScreen(): React.JSX.Element {
         ]);
     };
 
+    const onRefresh = async () => {
+        // For now we allow refresh even during upload because the modal blocks UI.
+        // In the future (non-blocking uploads) you may want to guard here or queue.
+        setRefreshing(true);
+        try {
+            const serverItems = await fetchFilesMock();
+
+            // Local items that are not on the server yet (e.g., uploading/failed/canceled or not synced)
+            const localPending = files.filter(f =>
+                f.status === 'uploading' || f.status === 'failed' || f.status === 'canceled'
+            );
+
+            // Merge: server list + local pending (local wins on same id)
+            const merged = mergeByIdSorted([...serverItems], localPending);
+
+            dispatch(setFiles(merged));
+        } catch (e) {
+            console.error('Refresh failed', e);
+            // potresti mostrare una snackbar qui, se preferisci
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
     // --- Render ----------------------------------------------------------------
 
     const renderItem = ({ item }: { item: FileItem }) => (
@@ -244,6 +281,8 @@ export default function HomeScreen(): React.JSX.Element {
                     renderItem={renderItem}
                     keyExtractor={keyExtractor}
                     contentContainerStyle={styles.listContent}
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
                 />
             )}
 
