@@ -2,16 +2,21 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import { View, StyleSheet, FlatList, Text, TouchableOpacity, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import Snackbar from '@/src/components/Snackbar';
 import FAB from '@/src/components/FAB';
 import EmptyState from '@/src/components/EmptyState';
 import UploadProgressModal from '@/src/components/UploadProgressModal';
+import Snackbar from '@/src/components/Snackbar';
+import FileListItem from '@/src/components/FileListItem';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
-import { addFile, removeFile, updateFile } from '@/src/store/filesReducer';
+import { addFile, updateFile, removeFile } from '@/src/store/filesReducer';
 import type { RootStackParamList } from '@/src/navigation/types';
 import type { FileItem } from '@/src/types/file';
-import { pick, isErrorWithCode, errorCodes, type DocumentPickerResponse } from '@react-native-documents/picker';
-import FileListItem from '@/src/components/FileListItem';
+import {
+    pick,
+    isErrorWithCode,
+    errorCodes,
+    type DocumentPickerResponse,
+} from '@react-native-documents/picker';
 import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
 
@@ -24,13 +29,16 @@ export default function HomeScreen(): React.JSX.Element {
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
 
-    const cancelUploadRef = useRef<(() => void) | null>(null);
-    const currentUploadingIdRef = useRef<string | null>(null);
-
+    // Snackbar state (generic): message + action
     const [snackVisible, setSnackVisible] = useState(false);
     const [snackMsg, setSnackMsg] = useState('');
-    const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const lastDeletedRef = useRef<FileItem | null>(null);
+    const [snackActionLabel, setSnackActionLabel] = useState<string | undefined>(undefined);
+    const snackActionRef = useRef<(() => void) | undefined>(undefined);
+    const snackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Upload control refs
+    const cancelUploadRef = useRef<(() => void) | null>(null);
+    const currentUploadingIdRef = useRef<string | null>(null);
 
     useLayoutEffect(() => {
         navigation.setOptions({
@@ -47,6 +55,34 @@ export default function HomeScreen(): React.JSX.Element {
         });
     }, [navigation, isUploading]);
 
+    // --- Helpers ---------------------------------------------------------------
+
+    const showSnack = (message: string, actionLabel?: string, onAction?: () => void, timeoutMs = 4000) => {
+        if (snackTimerRef.current) clearTimeout(snackTimerRef.current);
+        setSnackMsg(message);
+        setSnackActionLabel(actionLabel);
+        snackActionRef.current = onAction;
+        setSnackVisible(true);
+        snackTimerRef.current = setTimeout(() => {
+            setSnackVisible(false);
+            snackTimerRef.current = null;
+            snackActionRef.current = undefined;
+            setSnackActionLabel(undefined);
+        }, timeoutMs);
+    };
+
+    const handleSnackAction = () => {
+        if (snackTimerRef.current) {
+            clearTimeout(snackTimerRef.current);
+            snackTimerRef.current = null;
+        }
+        setSnackVisible(false);
+        const fn = snackActionRef.current;
+        snackActionRef.current = undefined;
+        setSnackActionLabel(undefined);
+        if (fn) fn();
+    };
+
     const mapPickerToFileItem = (pf: DocumentPickerResponse): FileItem => ({
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: pf.name ?? 'Unnamed',
@@ -57,54 +93,69 @@ export default function HomeScreen(): React.JSX.Element {
         progress: 0,
     });
 
+    const beginUpload = (item: FileItem) => {
+        // Block UI and set modal info
+        setUploading(true);
+        setCurrentName(item.name);
+        setProgress(0);
+        currentUploadingIdRef.current = item.id;
+
+        // Start mock
+        const cancel = startMockUpload(
+            item,
+            (pct) => {
+                setProgress(pct);
+                dispatch(updateFile(item.id, { progress: pct }));
+            },
+            () => {
+                dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
+                setUploading(false);
+                setCurrentName(undefined);
+                cancelUploadRef.current = null;
+                currentUploadingIdRef.current = null;
+                hapticSuccess(); // success haptic
+            },
+            (err) => {
+                console.error('Mock upload error', err);
+                dispatch(updateFile(item.id, { status: 'failed' }));
+                setUploading(false);
+                setCurrentName(undefined);
+                cancelUploadRef.current = null;
+                currentUploadingIdRef.current = null;
+                showSnack('Upload failed', 'RETRY', () => retryUpload(item.id));
+            }
+        );
+
+        cancelUploadRef.current = cancel;
+    };
+
+    const retryUpload = (id: string) => {
+        if (isUploading) {
+            Alert.alert('Upload in progress', 'Please wait until the current upload finishes.');
+            return;
+        }
+        const existing = files.find(f => f.id === id);
+        if (!existing) return;
+        // Reset status locally and re-begin
+        dispatch(updateFile(id, { status: 'uploading', progress: 0 }));
+        beginUpload({ ...existing, status: 'uploading', progress: 0 });
+    };
+
+    // --- Handlers --------------------------------------------------------------
+
     const handleAddPress = async () => {
         try {
-            const [pf] = await pick(); // opzionale: { allowMultiSelection: false }
+            const [pf] = await pick(); // single selection
             if (!pf) return;
 
             const fileItem = mapPickerToFileItem(pf);
-            setCurrentName(fileItem.name);
-            setProgress(0);
-            setUploading(true);
 
-            // optimistic add
+            // optimistic add then begin upload
             dispatch(addFile(fileItem));
-
-            // mock upload
-            const cancel = startMockUpload(
-                fileItem,
-                (pct) => {
-                    setProgress(pct);
-                    dispatch(updateFile(fileItem.id, { progress: pct }));
-                },
-                () => {
-                    dispatch(updateFile(fileItem.id, { status: 'uploaded', progress: 100 }));
-                    setUploading(false);
-                    setCurrentName(undefined);
-                    cancelUploadRef.current = null;
-                    currentUploadingIdRef.current = null;
-                    hapticSuccess();
-                },
-                (err) => {
-                    console.error('Mock upload error', err);
-                    dispatch(updateFile(fileItem.id, { status: 'failed' }));
-                    setUploading(false);
-                    setCurrentName(undefined);
-                    cancelUploadRef.current = null;
-                    currentUploadingIdRef.current = null;
-                    Alert.alert('Upload failed', 'Something went wrong while uploading your file.');
-                }
-            );
-
-            cancelUploadRef.current = cancel;            // <-- store cancel
-            currentUploadingIdRef.current = fileItem.id; // <-- store id
-
-            // In futuro potremmo esporre la cancel UI
-            void cancel;
-        } catch (e: any) {
+            beginUpload(fileItem);
+        } catch (e: unknown) {
             if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
-                // utente ha annullato: esci silenziosamente
-                return;
+                return; // user cancelled
             }
             console.error(e);
             Alert.alert('Picker error', String((e as any)?.message ?? e));
@@ -112,18 +163,18 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const handleCancelUpload = () => {
-        // chiude il mock
+        // stop mock
         cancelUploadRef.current?.();
         cancelUploadRef.current = null;
 
-        // marca l'item come canceled
         const id = currentUploadingIdRef.current;
         if (id) {
             dispatch(updateFile(id, { status: 'canceled' }));
+            // Offer retry via snackbar
+            showSnack('Upload canceled', 'RETRY', () => retryUpload(id));
         }
         currentUploadingIdRef.current = null;
 
-        // sblocca UI
         setUploading(false);
         setCurrentName(undefined);
         setProgress(0);
@@ -137,46 +188,17 @@ export default function HomeScreen(): React.JSX.Element {
                 text: 'Delete',
                 style: 'destructive',
                 onPress: () => {
-                    // salva l'oggetto completo per ripristino
-                    lastDeletedRef.current = item;
-                    // rimuovi dallo store
                     dispatch(removeFile(item.id));
-                    // mostra snackbar con undo; se scade, svuota il ref
-                    showUndoSnack('File deleted', () => {
-                        lastDeletedRef.current = null;
+                    showSnack('File deleted', 'UNDO', () => {
+                        // re-add with same data
+                        dispatch(addFile(item));
                     });
                 },
             },
         ]);
     };
 
-    const showUndoSnack = (message: string, onTimeout: () => void) => {
-        // cancella eventuale timer precedente
-        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-        setSnackMsg(message);
-        setSnackVisible(true);
-        // 4s di tempo per l'undo
-        undoTimerRef.current = setTimeout(() => {
-            setSnackVisible(false);
-            undoTimerRef.current = null;
-            onTimeout();
-        }, 4000);
-    };
-
-    const handleUndo = () => {
-        if (undoTimerRef.current) {
-            clearTimeout(undoTimerRef.current);
-            undoTimerRef.current = null;
-        }
-        setSnackVisible(false);
-
-        const deleted = lastDeletedRef.current;
-        if (deleted) {
-            // re-add in cima
-            dispatch(addFile(deleted));
-            lastDeletedRef.current = null;
-        }
-    };
+    // --- Render ----------------------------------------------------------------
 
     const renderItem = ({ item }: { item: FileItem }) => (
         <FileListItem
@@ -185,8 +207,10 @@ export default function HomeScreen(): React.JSX.Element {
             onPress={() => navigation.navigate('Details', { id: item.id })}
             onDelete={() => confirmDelete(item)}
             onLongPress={() => confirmDelete(item)}
+            onRetry={() => retryUpload(item.id)} // <-- NEW
         />
     );
+
     const keyExtractor = (item: FileItem) => item.id;
 
     return (
@@ -204,12 +228,18 @@ export default function HomeScreen(): React.JSX.Element {
 
             <FAB onPress={handleAddPress} />
 
-            <UploadProgressModal visible={isUploading} progress={progress} filename={currentName} onCancel={handleCancelUpload} />
+            <UploadProgressModal
+                visible={isUploading}
+                progress={progress}
+                filename={currentName}
+                onCancel={handleCancelUpload}
+            />
+
             <Snackbar
                 visible={snackVisible}
                 message={snackMsg}
-                actionLabel="UNDO"
-                onAction={handleUndo}
+                actionLabel={snackActionLabel}
+                onAction={handleSnackAction}
                 onDismiss={() => setSnackVisible(false)}
             />
         </View>
@@ -219,17 +249,6 @@ export default function HomeScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
     listContent: { padding: 16 },
-    item: {
-        backgroundColor: '#f7f7f8',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderColor: '#ececec',
-    },
-    itemName: { fontSize: 16, fontWeight: '600', color: '#111' },
-    itemMeta: { marginTop: 4, fontSize: 12, color: '#666' },
-    badge: { marginTop: 6, fontSize: 12, color: '#007aff', fontWeight: '600' },
     headerRightRow: { flexDirection: 'row' },
     headerBtn: { marginLeft: 12, paddingVertical: 6, paddingHorizontal: 8 },
     headerBtnText: { color: '#007aff', fontSize: 15, fontWeight: '500' },
