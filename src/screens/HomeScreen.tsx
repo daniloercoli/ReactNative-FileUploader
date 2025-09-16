@@ -29,16 +29,20 @@ export default function HomeScreen(): React.JSX.Element {
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
 
-    // Snackbar state (generic): message + action
+    // Snackbar (generic)
     const [snackVisible, setSnackVisible] = useState(false);
     const [snackMsg, setSnackMsg] = useState('');
     const [snackActionLabel, setSnackActionLabel] = useState<string | undefined>(undefined);
     const snackActionRef = useRef<(() => void) | undefined>(undefined);
     const snackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Upload control refs
+    // Upload control
     const cancelUploadRef = useRef<(() => void) | null>(null);
     const currentUploadingIdRef = useRef<string | null>(null);
+
+    // THROTTLE refs (single upload only)
+    const lastDispatchTsRef = useRef(0);
+    const lastPctRef = useRef(0);
 
     useLayoutEffect(() => {
         navigation.setOptions({
@@ -94,19 +98,33 @@ export default function HomeScreen(): React.JSX.Element {
     });
 
     const beginUpload = (item: FileItem) => {
+        // Reset throttle refs for this (single) upload
+        lastDispatchTsRef.current = 0;
+        lastPctRef.current = 0;
+
         // Block UI and set modal info
         setUploading(true);
         setCurrentName(item.name);
         setProgress(0);
         currentUploadingIdRef.current = item.id;
 
-        // Start mock
         const cancel = startMockUpload(
             item,
+            // onProgress (throttled Redux updates)
             (pct) => {
-                setProgress(pct);
-                dispatch(updateFile(item.id, { progress: pct }));
+                setProgress(pct); // modal progress: update every tick (cheap)
+
+                const now = Date.now();
+                const bigEnoughDelta = pct - lastPctRef.current >= 5;
+                const spacedEnough = now - lastDispatchTsRef.current >= 150;
+
+                if (bigEnoughDelta || spacedEnough) {
+                    lastPctRef.current = pct;
+                    lastDispatchTsRef.current = now;
+                    dispatch(updateFile(item.id, { progress: pct }));
+                }
             },
+            // onComplete
             () => {
                 dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
                 setUploading(false);
@@ -115,6 +133,7 @@ export default function HomeScreen(): React.JSX.Element {
                 currentUploadingIdRef.current = null;
                 hapticSuccess(); // success haptic
             },
+            // onError
             (err) => {
                 console.error('Mock upload error', err);
                 dispatch(updateFile(item.id, { status: 'failed' }));
@@ -136,7 +155,6 @@ export default function HomeScreen(): React.JSX.Element {
         }
         const existing = files.find(f => f.id === id);
         if (!existing) return;
-        // Reset status locally and re-begin
         dispatch(updateFile(id, { status: 'uploading', progress: 0 }));
         beginUpload({ ...existing, status: 'uploading', progress: 0 });
     };
@@ -150,7 +168,6 @@ export default function HomeScreen(): React.JSX.Element {
 
             const fileItem = mapPickerToFileItem(pf);
 
-            // optimistic add then begin upload
             dispatch(addFile(fileItem));
             beginUpload(fileItem);
         } catch (e: unknown) {
@@ -163,14 +180,12 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const handleCancelUpload = () => {
-        // stop mock
         cancelUploadRef.current?.();
         cancelUploadRef.current = null;
 
         const id = currentUploadingIdRef.current;
         if (id) {
             dispatch(updateFile(id, { status: 'canceled' }));
-            // Offer retry via snackbar
             showSnack('Upload canceled', 'RETRY', () => retryUpload(id));
         }
         currentUploadingIdRef.current = null;
@@ -181,7 +196,7 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const confirmDelete = (item: FileItem) => {
-        impactLight(); // haptic immediato al long-press
+        impactLight(); // haptic at long-press
         Alert.alert('Delete file', `Delete “${item.name}”?`, [
             { text: 'Cancel', style: 'cancel' },
             {
@@ -190,8 +205,7 @@ export default function HomeScreen(): React.JSX.Element {
                 onPress: () => {
                     dispatch(removeFile(item.id));
                     showSnack('File deleted', 'UNDO', () => {
-                        // re-add with same data
-                        dispatch(addFile(item));
+                        dispatch(addFile(item)); // restore
                     });
                 },
             },
@@ -207,7 +221,7 @@ export default function HomeScreen(): React.JSX.Element {
             onPress={() => navigation.navigate('Details', { id: item.id })}
             onDelete={() => confirmDelete(item)}
             onLongPress={() => confirmDelete(item)}
-            onRetry={() => retryUpload(item.id)} // <-- NEW
+            onRetry={() => retryUpload(item.id)}
         />
     );
 
