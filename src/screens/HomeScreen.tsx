@@ -15,16 +15,15 @@ import {
     pick,
     isErrorWithCode,
     errorCodes,
-    type DocumentPickerResponse,
-    types,
+    type DocumentPickerResponse
 } from '@react-native-documents/picker';
 import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
 import { fetchFilesMock } from '@/src/utils/serverMock';
 import { setFiles } from '@/src/store/filesReducer';
-import RNFS from 'react-native-fs';
 import { prepareZipFromPickerSelection } from '@/src/utils/zipBundle';
 import { safeUnlink, uriToPath } from '@/src/utils/fs';
+import ZipProgressModal from '@/src/components/ZipProgressModal';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -34,6 +33,10 @@ export default function HomeScreen(): React.JSX.Element {
     const [isUploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
+
+    const [isZipping, setIsZipping] = useState(false);
+    const [zipProgress, setZipProgress] = useState(0);
+    const [zipCount, setZipCount] = useState<number | undefined>(undefined);
 
     // Snackbar (generic)
     const [snackVisible, setSnackVisible] = useState(false);
@@ -249,17 +252,27 @@ export default function HomeScreen(): React.JSX.Element {
                         text: 'Zip all (one upload)',
                         onPress: async () => {
                             try {
-                                // prepara ZIP dalle COPIE del picker
-                                const zipInfo = await prepareZipFromPickerSelection(selection);
-                                const zipItem = mapZipToFileItem(zipInfo);
+                                setIsZipping(true);
+                                setZipProgress(0);
+                                setZipCount(selection.length);
 
-                                // aggiungi item e avvia upload
+                                const zipInfo = await prepareZipFromPickerSelection(selection, (pct) => {
+                                    setZipProgress(pct);
+                                });
+
+                                setIsZipping(false);
+                                setZipCount(undefined);
+                                setZipProgress(0);
+
+                                const zipItem = mapZipToFileItem(zipInfo);
                                 dispatch(addFile(zipItem));
                                 beginUpload(zipItem);
                             } catch (err) {
+                                setIsZipping(false);
+                                setZipCount(undefined);
+                                setZipProgress(0);
                                 console.error('ZIP preparation failed', err);
                                 Alert.alert('ZIP failed', 'Could not create the ZIP archive.');
-                                // opzionale: snackbar con retry zip
                             }
                         },
                     },
@@ -382,6 +395,8 @@ export default function HomeScreen(): React.JSX.Element {
                 filename={currentName}
                 onCancel={handleCancelUpload}
             />
+            
+            <ZipProgressModal visible={isZipping} progress={zipProgress} count={zipCount} />
 
             <Snackbar
                 visible={snackVisible}
