@@ -146,6 +146,7 @@ export async function prepareZipFromPickerSelection(
     try {
         const zipTargetUri = await zip(batchDir, zipTarget);
         const stat = await RNFS.stat(zipTargetUri);
+        if (onProgress) onProgress(100); // forza 100% al completamento zip
         return {
             zipPath: zipTarget,                // path senza "file://"
             zipName,
