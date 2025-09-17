@@ -47,6 +47,11 @@ export default function FileListItem({
                 onLongPress={onLongPress ?? onDelete}
             >
                 <Text style={styles.name}>{item.name}</Text>
+                {item.kind === 'zip' && item.bundleCount ? (
+                    <Text style={[styles.meta, { marginTop: 2 }]}>
+                        Bundle: {item.bundleCount} file{item.bundleCount > 1 ? 's' : ''}
+                    </Text>
+                ) : null}
                 <Text style={styles.meta}>
                     {item.type || 'unknown'} · {item.size ? `${item.size} bytes` : 'size N/A'}
                 </Text>

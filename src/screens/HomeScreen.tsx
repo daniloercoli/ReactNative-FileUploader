@@ -16,12 +16,15 @@ import {
     isErrorWithCode,
     errorCodes,
     type DocumentPickerResponse,
+    types,
 } from '@react-native-documents/picker';
 import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
 import { fetchFilesMock } from '@/src/utils/serverMock';
 import { setFiles } from '@/src/store/filesReducer';
-
+import RNFS from 'react-native-fs';
+import { prepareZipFromPickerSelection } from '@/src/utils/zipBundle';
+import { safeUnlink, uriToPath } from '@/src/utils/fs';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -113,6 +116,21 @@ export default function HomeScreen(): React.JSX.Element {
         progress: 0,
     });
 
+    const mapZipToFileItem = (zip: { zipPath: string; zipName: string; sizeBytes: number; count: number }): FileItem => ({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: zip.zipName,
+        uri: `file://${zip.zipPath}`,
+        type: 'application/zip',
+        size: zip.sizeBytes,
+        status: 'uploading',
+        progress: 0,
+        createdAt: Date.now(),
+        kind: 'zip',
+        bundleCount: zip.count,
+        localTempPath: zip.zipPath, // path locale SENZA schema per cleanup success/delete
+    });
+
+
     const beginUpload = (item: FileItem) => {
         // Reset throttle refs for this (single) upload
         lastDispatchTsRef.current = 0;
@@ -142,12 +160,23 @@ export default function HomeScreen(): React.JSX.Element {
             },
             // onComplete
             () => {
-                dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
+                // se ZIP locale, rimuovi dal device
+                if (item.kind === 'zip' && item.localTempPath) {
+                    safeUnlink(item.localTempPath).then(() => {
+                        dispatch(updateFile(item.id, { status: 'uploaded', progress: 100, localTempPath: undefined }));
+                    }).catch(() => {
+                        // anche se fallisce l'unlink, segna comunque uploaded
+                        dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
+                    });
+                } else {
+                    dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
+                }
+
                 setUploading(false);
                 setCurrentName(undefined);
                 cancelUploadRef.current = null;
                 currentUploadingIdRef.current = null;
-                hapticSuccess(); // success haptic
+                hapticSuccess();
             },
             // onError
             (err) => {
@@ -183,13 +212,66 @@ export default function HomeScreen(): React.JSX.Element {
             return;
         }
         try {
-            const [pf] = await pick(); // single selection
-            if (!pf) return;
+            const selection = await pick({
+                allowMultiSelection: true,
+                // opzionale: puoi limitare i tipi; per ora accettiamo tutto
+                // type: [types.allFiles],
+            });
 
-            const fileItem = mapPickerToFileItem(pf);
+            if (!selection || selection.length === 0) return;
 
-            dispatch(addFile(fileItem));
-            beginUpload(fileItem);
+            if (selection.length === 1) {
+                // singolo file → upload "single" come prima (usiamo la copia se presente)
+                const pf = selection[0];
+                const fileItem: FileItem = {
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    name: pf.name ?? 'Unnamed',
+                    uri: pf.uri,
+                    type: pf.type ?? 'application/octet-stream',
+                    size: pf.size ?? 0,
+                    status: 'uploading',
+                    progress: 0,
+                    createdAt: Date.now(),
+                    kind: 'single',
+                };
+                dispatch(addFile(fileItem));
+                beginUpload(fileItem);
+                return;
+            }
+
+            // multiple: chiedi come procedere (per ora solo ZIP)
+            Alert.alert(
+                'Multiple files selected',
+                'How would you like to upload these files?',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Zip all (one upload)',
+                        onPress: async () => {
+                            try {
+                                // prepara ZIP dalle COPIE del picker
+                                const zipInfo = await prepareZipFromPickerSelection(selection);
+                                const zipItem = mapZipToFileItem(zipInfo);
+
+                                // aggiungi item e avvia upload
+                                dispatch(addFile(zipItem));
+                                beginUpload(zipItem);
+                            } catch (err) {
+                                console.error('ZIP preparation failed', err);
+                                Alert.alert('ZIP failed', 'Could not create the ZIP archive.');
+                                // opzionale: snackbar con retry zip
+                            }
+                        },
+                    },
+                    {
+                        text: 'Upload separately (soon)',
+                        onPress: () => {
+                            Alert.alert('Not yet available', 'Uploading files separately will be added soon.');
+                        },
+                    },
+                ],
+                { cancelable: true }
+            );
         } catch (e: unknown) {
             if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
                 return; // user cancelled
@@ -198,6 +280,7 @@ export default function HomeScreen(): React.JSX.Element {
             Alert.alert('Picker error', String((e as any)?.message ?? e));
         }
     };
+
 
     const handleCancelUpload = () => {
         cancelUploadRef.current?.();
@@ -222,10 +305,15 @@ export default function HomeScreen(): React.JSX.Element {
             {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: () => {
+                onPress: async () => {
+                    // se ZIP locale, cancella anche dal device
+                    if (item.kind === 'zip' && item.localTempPath) {
+                        await safeUnlink(item.localTempPath);
+                    }
                     dispatch(removeFile(item.id));
                     showSnack('File deleted', 'UNDO', () => {
-                        dispatch(addFile(item)); // restore
+                        // re-add (nota: se era zip con localTempPath, l'UNDO NON ripristina il file fisico sul device)
+                        dispatch(addFile(item));
                     });
                 },
             },

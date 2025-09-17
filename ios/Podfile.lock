@@ -2396,6 +2396,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - RNFS (2.20.0):
+    - React-Core
   - RNGestureHandler (2.28.0):
     - boost
     - DoubleConversion
@@ -2692,7 +2694,15 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - RNZipArchive (7.0.2):
+    - React-Core
+    - RNZipArchive/Core (= 7.0.2)
+    - SSZipArchive (~> 2.5.5)
+  - RNZipArchive/Core (7.0.2):
+    - React-Core
+    - SSZipArchive (~> 2.5.5)
   - SocketRocket (0.7.1)
+  - SSZipArchive (2.5.5)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2770,17 +2780,20 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - RNFS (from `../node_modules/react-native-fs`)
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNKeychain (from `../node_modules/react-native-keychain`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNWorklets (from `../node_modules/react-native-worklets`)
+  - RNZipArchive (from `../node_modules/react-native-zip-archive`)
   - SocketRocket (~> 0.7.1)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
   trunk:
     - SocketRocket
+    - SSZipArchive
 
 EXTERNAL SOURCES:
   boost:
@@ -2930,6 +2943,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   RNCAsyncStorage:
     :path: "../node_modules/@react-native-async-storage/async-storage"
+  RNFS:
+    :path: "../node_modules/react-native-fs"
   RNGestureHandler:
     :path: "../node_modules/react-native-gesture-handler"
   RNKeychain:
@@ -2940,6 +2955,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-screens"
   RNWorklets:
     :path: "../node_modules/react-native-worklets"
+  RNZipArchive:
+    :path: "../node_modules/react-native-zip-archive"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -3017,14 +3034,17 @@ SPEC CHECKSUMS:
   ReactCodegen: 1d05923ad119796be9db37830d5e5dc76586aa00
   ReactCommon: 394c6b92765cf6d211c2c3f7f6bc601dffb316a6
   RNCAsyncStorage: 29f0230e1a25f36c20b05f65e2eb8958d6526e82
+  RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
   RNGestureHandler: 3a73f098d74712952870e948b3d9cf7b6cae9961
   RNKeychain: a2c134ab796272c3d605e035ab727591000b30f3
   RNReanimated: 9de34f0313c4177a34c079ca9fce6f1f278bff24
   RNScreens: 0bbf16c074ae6bb1058a7bf2d1ae017f4306797c
   RNWorklets: ad0606bee2a8103c14adb412149789c60b72bfb2
+  RNZipArchive: 4304f5100eab004eeb7349adc51997b3a28deb76
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
+  SSZipArchive: c69881e8ac5521f0e622291387add5f60f30f3c4
   Yoga: a3ed390a19db0459bd6839823a6ac6d9c6db198d
 
-PODFILE CHECKSUM: 82b984c1afe8b6d949a2a8e03f882e072ff3122f
+PODFILE CHECKSUM: 429e527c96fd0242114643ab17398d7b49a2ede1
 
 COCOAPODS: 1.16.2

@@ -7,7 +7,8 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# platform :ios, min_ios_version_supported
+platform :ios, '15.5'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -33,5 +34,17 @@ target 'FileUploader' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+  #aggiungi questo blocco per rialzare il target a XXX ovunque
+=begin  
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+     current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+      if current.nil? || current.to_f < 16.0
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      end
+    end
   end
-end
+=end
+end # <-- chiude post_install
+end # <-- chiude target

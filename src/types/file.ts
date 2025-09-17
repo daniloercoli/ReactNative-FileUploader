@@ -4,11 +4,14 @@ export type UploadStatus = 'uploaded' | 'uploading' | 'failed' | 'canceled';
 export interface FileItem {
     id: string;
     name: string;
-    uri: string;           // device URI
-    type?: string;         // MIME type
+    uri: string;           // device URI (file://) o remoto
+    type?: string;         // MIME
     size?: number;         // bytes
-    status?: UploadStatus; // defaults to 'uploaded'
+    status?: UploadStatus; // default 'uploaded'
     progress?: number;     // 0..100
-    createdAt?: number;    // epoch ms (for sorting)
-    remoteUrl?: string;    // optional canonical server URL (future)
+    createdAt?: number;
+    kind?: 'single' | 'zip'; // info bundle for ZIP
+    bundleCount?: number;
+    /** path locale al file ZIP (senza schema) da cancellare al successo o al delete */
+    localTempPath?: string;
 }
