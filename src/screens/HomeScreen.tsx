@@ -17,18 +17,20 @@ import {
     errorCodes,
     type DocumentPickerResponse
 } from '@react-native-documents/picker';
-import { startMockUpload } from '@/src/utils/uploadMock';
 import { impactLight, success as hapticSuccess } from '@/src/utils/haptics';
-import { fetchFilesMock } from '@/src/utils/serverMock';
 import { setFiles } from '@/src/store/filesReducer';
 import { prepareZipFromPickerSelection } from '@/src/utils/zipBundle';
 import { safeUnlink, uriToPath } from '@/src/utils/fs';
 import ZipProgressModal from '@/src/components/ZipProgressModal';
+import { resolveApiConfig, buildApiUrls, buildAuthHeader } from '@/src/utils/api';
+import { RealUploadInput, uploadReal } from '@/src/utils/uploadReal';
+
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const dispatch = useAppDispatch();
     const files = useAppSelector(state => state.files.items);
+    const rootState = useAppSelector(s => s);
 
     const [isUploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -133,24 +135,53 @@ export default function HomeScreen(): React.JSX.Element {
         localTempPath: zip.zipPath, // path locale SENZA schema per cleanup success/delete
     });
 
+    const beginUpload = async (item: FileItem) => {
+        if (hasActiveUpload()) {
+            Alert.alert('Upload in progress', 'Please wait until the current upload finishes.');
+            return;
+        }
 
-    const beginUpload = (item: FileItem) => {
-        // Reset throttle refs for this (single) upload
+        // Reset throttle refs per questo upload
         lastDispatchTsRef.current = 0;
         lastPctRef.current = 0;
 
-        // Block UI and set modal info
+        // Blocca UI + setup modale
         setUploading(true);
         setCurrentName(item.name);
         setProgress(0);
         currentUploadingIdRef.current = item.id;
 
-        const cancel = startMockUpload(
-            item,
-            // onProgress (throttled Redux updates)
-            (pct) => {
-                setProgress(pct); // modal progress: update every tick (cheap)
+        // Ricava config dal Redux store
+        let cfg;
+        try {
+            cfg = resolveApiConfig(rootState);
+        } catch (err: any) {
+            setUploading(false);
+            currentUploadingIdRef.current = null;
+            Alert.alert('Missing settings', String(err?.message ?? err));
+            return;
+        }
 
+        let input: RealUploadInput;
+        if (item.kind === 'zip') {
+            if (!item.localTempPath) {
+                // caso anomalo: zip senza path locale
+                setUploading(false);
+                currentUploadingIdRef.current = null;
+                Alert.alert('Upload error', 'Missing local ZIP path.');
+                return;
+            }
+            input = { kind: 'zip', path: item.localTempPath, name: item.name };
+        } else {
+            input = { kind: 'file', uri: item.uri, name: item.name, mime: item.type ?? '' };
+        }
+
+        // Avvia upload reale (XMLHttpRequest) con progress e cancel
+        try {
+            const { result, cancel } = await uploadReal(cfg, input, (pct) => {
+                setProgress(pct); // modale: ogni tick
+
+                // Throttle verso Redux
                 const now = Date.now();
                 const bigEnoughDelta = pct - lastPctRef.current >= 5;
                 const spacedEnough = now - lastDispatchTsRef.current >= 150;
@@ -160,41 +191,56 @@ export default function HomeScreen(): React.JSX.Element {
                     lastDispatchTsRef.current = now;
                     dispatch(updateFile(item.id, { progress: pct }));
                 }
-            },
-            // onComplete
-            () => {
+            });
+
+            cancelUploadRef.current = cancel;
+
+            if (result.ok) {
                 // se ZIP locale, rimuovi dal device
                 if (item.kind === 'zip' && item.localTempPath) {
-                    safeUnlink(item.localTempPath).then(() => {
-                        dispatch(updateFile(item.id, { status: 'uploaded', progress: 100, localTempPath: undefined }));
-                    }).catch(() => {
-                        // anche se fallisce l'unlink, segna comunque uploaded
-                        dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
-                    });
+                    try { await safeUnlink(item.localTempPath); } catch { }
+                    dispatch(updateFile(item.id, { status: 'uploaded', progress: 100, localTempPath: undefined }));
                 } else {
                     dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
                 }
-
                 setUploading(false);
                 setCurrentName(undefined);
                 cancelUploadRef.current = null;
                 currentUploadingIdRef.current = null;
                 hapticSuccess();
-            },
-            // onError
-            (err) => {
-                console.error('Mock upload error', err);
+            } else {
+                // Errori “chiari” dal server (413/415) → mostra dettagli se presenti
+                const msg =
+                    result.json?.error ||
+                    result.json?.message ||
+                    result.error ||
+                    `Upload failed (HTTP ${result.status})`;
                 dispatch(updateFile(item.id, { status: 'failed' }));
                 setUploading(false);
                 setCurrentName(undefined);
                 cancelUploadRef.current = null;
                 currentUploadingIdRef.current = null;
-                showSnack('Upload failed', 'RETRY', () => retryUpload(item.id));
-            }
-        );
 
-        cancelUploadRef.current = cancel;
+                // Messaggi amichevoli per limiti/mime
+                if (result.status === 413 && result.json?.limitHuman) {
+                    showSnack(`File too large (limit ${result.json.limitHuman})`, 'RETRY', () => retryUpload(item.id));
+                } else if (result.status === 415 && Array.isArray(result.json?.allowed)) {
+                    showSnack(`Unsupported type. Allowed: ${result.json.allowed.join(', ')}`, 'RETRY', () => retryUpload(item.id));
+                } else {
+                    showSnack(msg, 'RETRY', () => retryUpload(item.id));
+                }
+            }
+        } catch (err) {
+            console.error('Upload error', err);
+            dispatch(updateFile(item.id, { status: 'failed' }));
+            setUploading(false);
+            setCurrentName(undefined);
+            cancelUploadRef.current = null;
+            currentUploadingIdRef.current = null;
+            showSnack('Upload failed', 'RETRY', () => retryUpload(item.id));
+        }
     };
+
 
     const retryUpload = (id: string) => {
         if (hasActiveUpload()) {
@@ -206,6 +252,43 @@ export default function HomeScreen(): React.JSX.Element {
         dispatch(updateFile(id, { status: 'uploading', progress: 0 }));
         beginUpload({ ...existing, status: 'uploading', progress: 0 });
     };
+
+    // --- Server list helper (real) ---
+    const fetchFilesReal = async () => {
+        // Leggi config
+        const state = useAppSelector(s => s);
+        const cfg = resolveApiConfig(state);
+
+        const { primary, fallback } = buildApiUrls(cfg.baseUrl, '/fileuploader/v1/files?page=1&per_page=1000&order=desc');
+        const auth = buildAuthHeader(cfg.username, cfg.appPassword);
+
+        // prova primaria
+        let res = await fetch(primary, { headers: { Authorization: auth, Accept: 'application/json' } });
+        // fallback su 404
+        if (res.status === 404) {
+            res = await fetch(fallback, { headers: { Authorization: auth, Accept: 'application/json' } });
+        }
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`Files list failed: HTTP ${res.status} ${text}`);
+        }
+        const json = await res.json();
+        // Adatta il payload del server a FileItem[] (qui presumo il tuo tipo)
+        // Server: items: [{ name, url, size, mime, modified }]
+        const serverItems: FileItem[] = (json.items ?? []).map((it: any) => ({
+            id: `srv_${it.name}`,           // id stabile lato client (puoi migliorarla)
+            name: it.name,
+            uri: it.url,
+            type: it.mime ?? 'application/octet-stream',
+            size: Number(it.size ?? 0),
+            status: 'uploaded',
+            progress: 100,
+            createdAt: it.modified ? Date.parse(it.modified) : Date.now(),
+            kind: 'server',
+        }));
+        return serverItems;
+    };
+
 
     // --- Handlers --------------------------------------------------------------
 
@@ -334,28 +417,26 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const onRefresh = async () => {
-        // For now we allow refresh even during upload because the modal blocks UI.
-        // In the future (non-blocking uploads) you may want to guard here or queue.
         setRefreshing(true);
         try {
-            const serverItems = await fetchFilesMock();
+            const serverItems = await fetchFilesReal();
 
-            // Local items that are not on the server yet (e.g., uploading/failed/canceled or not synced)
+            // Local items che non sono sul server (uploading/failed/canceled)
             const localPending = files.filter(f =>
                 f.status === 'uploading' || f.status === 'failed' || f.status === 'canceled'
             );
 
-            // Merge: server list + local pending (local wins on same id)
+            // Merge: server list + local pending (local wins su stesso id)
             const merged = mergeByIdSorted([...serverItems], localPending);
-
             dispatch(setFiles(merged));
         } catch (e) {
             console.error('Refresh failed', e);
-            // potresti mostrare una snackbar qui, se preferisci
+            showSnack('Refresh failed');
         } finally {
             setRefreshing(false);
         }
     };
+
 
     // --- Render ----------------------------------------------------------------
 
@@ -395,7 +476,7 @@ export default function HomeScreen(): React.JSX.Element {
                 filename={currentName}
                 onCancel={handleCancelUpload}
             />
-            
+
             <ZipProgressModal visible={isZipping} progress={zipProgress} count={zipCount} />
 
             <Snackbar
