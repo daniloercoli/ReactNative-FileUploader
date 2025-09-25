@@ -22,7 +22,7 @@ import { setFiles } from '@/src/store/filesReducer';
 import { prepareZipFromPickerSelection } from '@/src/utils/zipBundle';
 import { safeUnlink, uriToPath } from '@/src/utils/fs';
 import ZipProgressModal from '@/src/components/ZipProgressModal';
-import { resolveApiConfig, buildApiUrls, buildAuthHeader } from '@/src/utils/api';
+import { resolveApiConfigFromAuth, buildApiUrls, buildAuthHeader } from '@/src/utils/api';
 import { RealUploadInput, uploadReal } from '@/src/utils/uploadReal';
 
 
@@ -30,8 +30,7 @@ export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const dispatch = useAppDispatch();
     const files = useAppSelector(state => state.files.items);
-    const rootState = useAppSelector(s => s);
-
+    const auth = useAppSelector(state => state.auth);
     const [isUploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentName, setCurrentName] = useState<string | undefined>(undefined);
@@ -154,7 +153,7 @@ export default function HomeScreen(): React.JSX.Element {
         // Ricava config dal Redux store
         let cfg;
         try {
-            cfg = resolveApiConfig(rootState);
+            cfg = resolveApiConfigFromAuth(auth);
         } catch (err: any) {
             setUploading(false);
             currentUploadingIdRef.current = null;
