@@ -22,3 +22,8 @@ export function normalizeUrl(input: string): string | null {
         return null;
     }
 }
+
+export function isHttpUrl(u?: string): boolean {
+  return !!u && /^https?:\/\//i.test(u);
+}
+

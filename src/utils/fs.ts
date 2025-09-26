@@ -35,3 +35,15 @@ export function sanitizeFilename(name: string): string {
     const safe = name.replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_').replace(/\s+/g, ' ').trim();
     return safe.length ? safe : 'file';
 }
+
+export function formatBytes(n?: number): string {
+  if (!n || n <= 0) return 'N/A';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return i === 0 ? `${v} ${units[i]}` : `${v.toFixed(2)} ${units[i]}`;
+}
