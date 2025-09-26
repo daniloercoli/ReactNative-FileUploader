@@ -24,7 +24,8 @@ import { safeUnlink, uriToPath } from '@/src/utils/fs';
 import ZipProgressModal from '@/src/components/ZipProgressModal';
 import { resolveApiConfigFromAuth, buildApiUrls, buildAuthHeader } from '@/src/utils/api';
 import { RealUploadInput, uploadReal } from '@/src/utils/uploadReal';
-
+import BlockingLoaderModal from '@/src/components/BlockingLoaderModal';
+import { fetchFilesList } from '@/src/utils/filesApi';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -59,6 +60,10 @@ export default function HomeScreen(): React.JSX.Element {
 
     const [refreshing, setRefreshing] = useState(false);
 
+    // Stato locale per il primo sync
+    const [initialSyncVisible, setInitialSyncVisible] = useState(false);
+    const initialSyncedRef = useRef(false); // evita sync duplicati
+
     useLayoutEffect(() => {
         navigation.setOptions({
             headerRight: () => (
@@ -73,6 +78,39 @@ export default function HomeScreen(): React.JSX.Element {
             ),
         });
     }, [navigation, isUploading]);
+
+    React.useEffect(() => {
+        // parti solo se ci sono credenziali valide e non stai già caricando
+        const hasCreds = !!auth.siteUrl && !!auth.username && !!auth.password;
+        if (!hasCreds) return;
+        if (initialSyncedRef.current) return;         // già sincronizzato in questa sessione
+        if (isUploading || isZipping) return;         // non disturbare un upload/blocco zip
+
+        const run = async () => {
+            try {
+                setInitialSyncVisible(true);
+                const cfg = resolveApiConfigFromAuth(auth);
+                const serverItems = await fetchFilesList(cfg, 1, 1000, 'desc');
+
+                // Local items che non sono sul server (uploading/failed/canceled)
+                const localPending = files.filter(f =>
+                    f.status === 'uploading' || f.status === 'failed' || f.status === 'canceled'
+                );
+
+                const merged = mergeByIdSorted([...serverItems], localPending);
+                dispatch(setFiles(merged));
+            } catch (e) {
+                console.error('Initial sync failed', e);
+                showSnack('Failed to load files from server');
+            } finally {
+                initialSyncedRef.current = true;
+                setInitialSyncVisible(false);
+            }
+        };
+        run();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [auth.siteUrl, auth.username, auth.password, isUploading, isZipping]);
+
 
     // --- Helpers ---------------------------------------------------------------
 
@@ -174,7 +212,7 @@ export default function HomeScreen(): React.JSX.Element {
         } else {
             input = { kind: 'file', uri: item.uri, name: item.name, mime: item.type ?? '' };
         }
-
+        console.debug('[beginUpload] informazioni del file:', input);
         // Avvia upload reale (XMLHttpRequest) con progress e cancel
         try {
             const { result, cancel } = await uploadReal(cfg, input, (pct) => {
@@ -251,43 +289,6 @@ export default function HomeScreen(): React.JSX.Element {
         dispatch(updateFile(id, { status: 'uploading', progress: 0 }));
         beginUpload({ ...existing, status: 'uploading', progress: 0 });
     };
-
-    // --- Server list helper (real) ---
-    const fetchFilesReal = async () => {
-        // Leggi config
-        const state = useAppSelector(s => s);
-        const cfg = resolveApiConfig(state);
-
-        const { primary, fallback } = buildApiUrls(cfg.baseUrl, '/fileuploader/v1/files?page=1&per_page=1000&order=desc');
-        const auth = buildAuthHeader(cfg.username, cfg.appPassword);
-
-        // prova primaria
-        let res = await fetch(primary, { headers: { Authorization: auth, Accept: 'application/json' } });
-        // fallback su 404
-        if (res.status === 404) {
-            res = await fetch(fallback, { headers: { Authorization: auth, Accept: 'application/json' } });
-        }
-        if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`Files list failed: HTTP ${res.status} ${text}`);
-        }
-        const json = await res.json();
-        // Adatta il payload del server a FileItem[] (qui presumo il tuo tipo)
-        // Server: items: [{ name, url, size, mime, modified }]
-        const serverItems: FileItem[] = (json.items ?? []).map((it: any) => ({
-            id: `srv_${it.name}`,           // id stabile lato client (puoi migliorarla)
-            name: it.name,
-            uri: it.url,
-            type: it.mime ?? 'application/octet-stream',
-            size: Number(it.size ?? 0),
-            status: 'uploaded',
-            progress: 100,
-            createdAt: it.modified ? Date.parse(it.modified) : Date.now(),
-            kind: 'server',
-        }));
-        return serverItems;
-    };
-
 
     // --- Handlers --------------------------------------------------------------
 
@@ -416,16 +417,15 @@ export default function HomeScreen(): React.JSX.Element {
     };
 
     const onRefresh = async () => {
+        // Consenti il refresh anche durante upload: la UI è bloccante, ma teniamo la logica pronta
         setRefreshing(true);
         try {
-            const serverItems = await fetchFilesReal();
+            const cfg = resolveApiConfigFromAuth(auth);
+            const serverItems = await fetchFilesList(cfg, 1, 1000, 'desc');
 
-            // Local items che non sono sul server (uploading/failed/canceled)
             const localPending = files.filter(f =>
                 f.status === 'uploading' || f.status === 'failed' || f.status === 'canceled'
             );
-
-            // Merge: server list + local pending (local wins su stesso id)
             const merged = mergeByIdSorted([...serverItems], localPending);
             dispatch(setFiles(merged));
         } catch (e) {
@@ -435,7 +435,6 @@ export default function HomeScreen(): React.JSX.Element {
             setRefreshing(false);
         }
     };
-
 
     // --- Render ----------------------------------------------------------------
 
@@ -477,6 +476,8 @@ export default function HomeScreen(): React.JSX.Element {
             />
 
             <ZipProgressModal visible={isZipping} progress={zipProgress} count={zipCount} />
+
+            <BlockingLoaderModal visible={initialSyncVisible} message="Getting your files…" />
 
             <Snackbar
                 visible={snackVisible}

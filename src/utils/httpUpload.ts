@@ -94,13 +94,19 @@ function xhrPost(
                 }
             };
 
-            xhr.onerror = (ev) => {
+            // helper locale: estrae "type" in modo sicuro, senza dipendere dai tipi DOM
+            const getEventType = (ev: unknown): string =>
+                ev && typeof (ev as { type?: unknown }).type === 'string'
+                    ? (ev as { type: string }).type
+                    : 'unknown';
+
+            xhr.onerror = (ev: ProgressEvent<EventTarget>) => {
                 const extra = {
                     readyState: xhr.readyState,   // es. 4 = DONE
                     status: xhr.status,           // quasi sempre 0
                     responseURL: xhr.responseURL, // vuoto se non ha raggiunto il server
                     responseText: xhr.responseText?.slice(0, 200), // primi 200 char
-                    eventType: ev?.type,
+                    eventType: getEventType(ev),
                 };
                 console.error('[upload] Network error', { url, elapsed: dur(t0), ...extra });
                 resolve({ ok: false, status: xhr.status || 0, error: 'Network error' });
