@@ -26,6 +26,8 @@ import { resolveApiConfigFromAuth, buildApiUrls, buildAuthHeader } from '@/src/u
 import { RealUploadInput, uploadReal } from '@/src/utils/uploadReal';
 import BlockingLoaderModal from '@/src/components/BlockingLoaderModal';
 import { fetchFilesList } from '@/src/utils/filesApi';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { Platform, ToastAndroid } from 'react-native';
 
 export default function HomeScreen(): React.JSX.Element {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -136,6 +138,16 @@ export default function HomeScreen(): React.JSX.Element {
         }, timeoutMs);
     };
 
+    // TODO: possiamo eliminare ed usare showSnack anche su Android?
+    const showToast = (message: string) => {
+        if (Platform.OS === 'android') {
+            ToastAndroid.show(message, ToastAndroid.SHORT);
+        } else {
+            // iOS/macOS: usa la tua Snackbar con timeout breve
+            showSnack(message, undefined, undefined, 1500);
+        }
+    };
+
     const handleSnackAction = () => {
         if (snackTimerRef.current) {
             clearTimeout(snackTimerRef.current);
@@ -233,13 +245,35 @@ export default function HomeScreen(): React.JSX.Element {
             cancelUploadRef.current = cancel;
 
             if (result.ok) {
+                const serverUrl: string | undefined =
+                    typeof result.json?.url === 'string' ? result.json.url : undefined;
+
+                const serverName: string | undefined = result.json?.file;
+                const serverMime: string | undefined = result.json?.mime;
+                const serverSize: number | undefined = Number(result.json?.size ?? result.json?.sizeBytes);
                 // se ZIP locale, rimuovi dal device
                 if (item.kind === 'zip' && item.localTempPath) {
                     try { await safeUnlink(item.localTempPath); } catch { }
-                    dispatch(updateFile(item.id, { status: 'uploaded', progress: 100, localTempPath: undefined }));
+                    dispatch(updateFile(item.id, {
+                        status: 'uploaded',
+                        progress: 100,
+                        localTempPath: undefined,
+                        ...(serverUrl ? { uri: serverUrl } : {}),
+                        ...(serverName ? { name: serverName } : {}),
+                        ...(serverMime ? { type: serverMime } : {}),
+                        ...(Number.isFinite(serverSize) ? { size: serverSize as number } : {}),
+                    }));
                 } else {
-                    dispatch(updateFile(item.id, { status: 'uploaded', progress: 100 }));
+                    dispatch(updateFile(item.id, {
+                        status: 'uploaded',
+                        progress: 100,
+                        ...(serverUrl ? { uri: serverUrl } : {}),
+                        ...(serverName ? { name: serverName } : {}),
+                        ...(serverMime ? { type: serverMime } : {}),
+                        ...(Number.isFinite(serverSize) ? { size: serverSize as number } : {}),
+                    }));
                 }
+
                 setUploading(false);
                 setCurrentName(undefined);
                 cancelUploadRef.current = null;
@@ -436,6 +470,23 @@ export default function HomeScreen(): React.JSX.Element {
         }
     };
 
+    const handleLongPressCopy = async (item: FileItem) => {
+        // prendiamo solo URL http/https (non i path locali file://)
+        const url = item.uri?.startsWith('http') ? item.uri : undefined;
+
+        if (!url) {
+            showToast('No server URL available yet');
+            return;
+        }
+        try {
+            await Clipboard.setString(url);
+            showToast('URL copied to clipboard');
+        } catch (e) {
+            console.error('Clipboard copy failed', e);
+            showSnack('Could not copy URL');
+        }
+    };
+
     // --- Render ----------------------------------------------------------------
 
     const renderItem = ({ item }: { item: FileItem }) => (
@@ -444,7 +495,7 @@ export default function HomeScreen(): React.JSX.Element {
             disabled={isUploading}
             onPress={() => navigation.navigate('Details', { id: item.id })}
             onDelete={() => confirmDelete(item)}
-            onLongPress={() => confirmDelete(item)}
+            onLongPress={() => handleLongPressCopy(item)}
             onRetry={() => retryUpload(item.id)}
         />
     );
