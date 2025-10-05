@@ -1,6 +1,3 @@
-// src/utils/httpUpload.ts
-// Real HTTP upload with progress + cancel (XMLHttpRequest), with wp-json → index.php fallback.
-
 import { buildApiUrls, buildAuthHeader, type ApiConfig } from './api';
 
 export type UploadProgressCb = (pct: number) => void;
@@ -28,20 +25,28 @@ const maskAuth = (authHeader: string) => {
     return `${scheme} ${token.slice(0, 6)}…(${token.length})`;
 };
 
+function hasScheme(u: string): boolean {
+    return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(u); // es. file://, content://, https://
+}
+
+function normalizeUploadUri(u: string): string {
+    if (!u) return u;
+    return hasScheme(u) ? u : `file://${u}`;
+}
+
 function makeFormData(p: UploadParams): FormData {
     const fd = new FormData();
-    try {
-        const uri = p.fileUri.startsWith('file://') ? p.fileUri : `file://${p.fileUri}`;
-        fd.append('file', { uri, name: p.fileName, type: p.mimeType } as unknown as Blob);
-        console.debug('[upload] FormData prepared', {
-            name: p.fileName,
-            type: p.mimeType,
-            hasFile: true,
-        });
-    } catch (err) {
-        console.error('[upload] FormData error', err);
-        throw err; // bubble up, nothing we can do without a body
-    }
+    const uri = normalizeUploadUri(p.fileUri);
+
+    // Log utile per debug
+    console.debug('[upload] using uri for FormData:', uri);
+
+    fd.append('file', {
+        uri,
+        name: p.fileName,
+        type: p.mimeType,
+    } as unknown as Blob);
+
     return fd;
 }
 
